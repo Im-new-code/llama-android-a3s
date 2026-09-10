@@ -14,7 +14,7 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build unzip wget
+          sudo apt-get install -y cmake ninja-build unzip wget file
 
       - name: Download Android NDK r27d
         run: |
@@ -53,33 +53,52 @@ jobs:
             -DLLAMA_BUILD_UI=OFF \
             -DLLAMA_OPENSSL=OFF
 
-      - name: Build unified llama
+      - name: Build llama
         run: |
-          cmake --build build --target llama -j2
+          cmake --build build -j2
+
+      - name: Locate llama executable
+        run: |
+          echo "Searching for llama executable..."
+          find build -type f -name "llama" -print
+          echo "Searching executable files..."
+          find build -type f -executable -print
+
+      - name: Prepare executable
+        run: |
+          LLAMA_BIN=$(find build -type f -name "llama" -perm -111 | head -n 1)
+
+          if [ -z "$LLAMA_BIN" ]; then
+            echo "ERROR: llama executable was not found."
+            exit 1
+          fi
+
+          echo "Found: $LLAMA_BIN"
+
+          mkdir -p release
+          cp "$LLAMA_BIN" release/llama
 
       - name: Strip executable
         run: |
           "$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip" \
             --strip-all \
-            build/bin/llama
+            release/llama
 
-      - name: Check executable
+      - name: Verify executable
         run: |
-          file build/bin/llama
-          ls -lh build/bin/llama
+          file release/llama
+          ls -lh release/llama
 
       - name: Package
         run: |
-          mkdir -p release
-          cp build/bin/llama release/llama
-          chmod +x release/llama
-
           cd release
           zip -9 ../llama-android-arm64-api27-lean.zip llama
 
-      - name: Show final size
+      - name: Show final sizes
         run: |
-          ls -lh build/bin/llama
+          echo "Executable:"
+          ls -lh release/llama
+          echo "Compressed archive:"
           ls -lh llama-android-arm64-api27-lean.zip
 
       - name: Upload artifact
