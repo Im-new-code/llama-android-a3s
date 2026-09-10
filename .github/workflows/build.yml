@@ -8,10 +8,10 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install build dependencies
+      - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y cmake ninja-build unzip wget
@@ -26,7 +26,7 @@ jobs:
         run: |
           git clone --depth 1 https://github.com/ggml-org/llama.cpp.git
 
-      - name: Configure llama.cpp
+      - name: Configure
         run: |
           cmake -S llama.cpp -B build \
             -G Ninja \
@@ -34,35 +34,40 @@ jobs:
             -DANDROID_ABI=arm64-v8a \
             -DANDROID_PLATFORM=android-27 \
             -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_SHARED_LIBS=OFF \
             -DGGML_OPENMP=OFF \
             -DGGML_OPENCL=OFF \
             -DGGML_VULKAN=OFF \
             -DGGML_METAL=OFF \
             -DGGML_CUDA=OFF \
             -DGGML_RPC=OFF \
+            -DGGML_NATIVE=OFF \
             -DLLAMA_BUILD_TESTS=OFF \
-            -DLLAMA_BUILD_EXAMPLES=ON \
-            -DLLAMA_BUILD_SERVER=OFF
+            -DLLAMA_BUILD_EXAMPLES=OFF \
+            -DLLAMA_BUILD_TOOLS=OFF \
+            -DLLAMA_BUILD_SERVER=OFF \
+            -DLLAMA_BUILD_APP=ON \
+            -DLLAMA_BUILD_UI=OFF \
+            -DLLAMA_OPENSSL=OFF
 
-      - name: Build llama-app
+      - name: Build unified llama binary
         run: |
-          cmake --build build --target llama-app -j2
+          cmake --build build --target llama -j2
 
-      - name: Prepare release files
+      - name: Prepare artifact
         run: |
           mkdir -p release
-          cp build/bin/llama-app release/
-          cp llama.cpp/LICENSE release/
-          chmod +x release/llama-app
+          cp build/bin/llama release/
+          chmod +x release/llama
 
       - name: Package
         run: |
           cd release
-          zip -9 ../llama-app-android-arm64-api27.zip llama-app LICENSE
+          zip -9 ../llama-android-arm64-api27.zip llama
 
-      - name: Upload binary
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: llama-app-android-arm64-api27
-          path: llama-app-android-arm64-api27.zip
+          name: llama-android-arm64-api27
+          path: llama-android-arm64-api27.zip
           retention-days: 7
