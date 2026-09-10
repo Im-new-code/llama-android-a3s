@@ -1,4 +1,4 @@
-name: Build lean llama.cpp for Android API 27 ARM64
+name: Build Minimal llama-cli for Android A3s
 
 on:
   workflow_dispatch:
@@ -8,13 +8,13 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install build dependencies
+      - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build unzip wget file
+          sudo apt-get install -y cmake ninja-build unzip wget git file
 
       - name: Download Android NDK r27d
         run: |
@@ -24,9 +24,9 @@ jobs:
 
       - name: Clone llama.cpp
         run: |
-          git clone --depth 1 https://github.com/ggml-org/llama.cpp.git
+          git clone --depth 1 --branch b4650 https://github.com/ggml-org/llama.cpp.git
 
-      - name: Configure lean ARM64 build
+      - name: Configure
         run: |
           cmake -S llama.cpp -B build \
             -G Ninja \
@@ -42,49 +42,32 @@ jobs:
             -DGGML_OPENMP=OFF \
             -DGGML_OPENCL=OFF \
             -DGGML_VULKAN=OFF \
-            -DGGML_METAL=OFF \
             -DGGML_CUDA=OFF \
+            -DGGML_METAL=OFF \
             -DGGML_RPC=OFF \
             -DLLAMA_BUILD_TESTS=OFF \
             -DLLAMA_BUILD_EXAMPLES=OFF \
-            -DLLAMA_BUILD_TOOLS=OFF \
+            -DLLAMA_BUILD_TOOLS=ON \
             -DLLAMA_BUILD_SERVER=OFF \
-            -DLLAMA_BUILD_APP=ON \
-            -DLLAMA_BUILD_UI=OFF \
+            -DLLAMA_BUILD_APP=OFF \
             -DLLAMA_OPENSSL=OFF
 
-      - name: Build llama
+      - name: Build llama-cli
         run: |
-          cmake --build build -j2
+          cmake --build build --target llama-cli -j2
 
-      - name: Locate llama executable
+      - name: Find executable
         run: |
-          echo "Searching for llama executable..."
-          find build -type f -name "llama" -print
-          echo "Searching executable files..."
-          find build -type f -executable -print
+          find build -type f -name "llama-cli" -print
 
-      - name: Prepare executable
+      - name: Strip
         run: |
-          LLAMA_BIN=$(find build -type f -name "llama" -perm -111 | head -n 1)
-
-          if [ -z "$LLAMA_BIN" ]; then
-            echo "ERROR: llama executable was not found."
-            exit 1
-          fi
-
-          echo "Found: $LLAMA_BIN"
-
           mkdir -p release
-          cp "$LLAMA_BIN" release/llama
-
-      - name: Strip executable
-        run: |
+          cp "$(find build -type f -name llama-cli -perm -111 | head -n 1)" release/llama
           "$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip" \
-            --strip-all \
-            release/llama
+            --strip-all release/llama
 
-      - name: Verify executable
+      - name: Verify
         run: |
           file release/llama
           ls -lh release/llama
@@ -92,18 +75,16 @@ jobs:
       - name: Package
         run: |
           cd release
-          zip -9 ../llama-android-arm64-api27-lean.zip llama
+          zip -9 ../llama-a3s-minimal.zip llama
 
-      - name: Show final sizes
+      - name: Show size
         run: |
-          echo "Executable:"
           ls -lh release/llama
-          echo "Compressed archive:"
-          ls -lh llama-android-arm64-api27-lean.zip
+          ls -lh llama-a3s-minimal.zip
 
-      - name: Upload artifact
+      - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: llama-android-arm64-api27-lean
-          path: llama-android-arm64-api27-lean.zip
+          name: llama-a3s-minimal
+          path: llama-a3s-minimal.zip
           retention-days: 7
