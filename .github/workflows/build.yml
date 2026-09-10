@@ -42,22 +42,29 @@ jobs:
             -DGGML_CUDA=OFF \
             -DGGML_RPC=OFF \
             -DGGML_NATIVE=OFF \
-            -DLLAMA_BUILD_TESTS=OFF \
-            -DLLAMA_BUILD_EXAMPLES=OFF \
-            -DLLAMA_BUILD_TOOLS=OFF \
-            -DLLAMA_BUILD_SERVER=OFF \
+            -DLLAMA_OPENSSL=OFF \
+            -DLLAMA_BUILD_COMMON=ON \
+            -DLLAMA_BUILD_TOOLS=ON \
+            -DLLAMA_BUILD_SERVER=ON \
             -DLLAMA_BUILD_APP=ON \
             -DLLAMA_BUILD_UI=OFF \
-            -DLLAMA_OPENSSL=OFF
+            -DLLAMA_USE_PREBUILT_UI=OFF \
+            -DLLAMA_BUILD_TESTS=OFF \
+            -DLLAMA_BUILD_EXAMPLES=OFF
 
       - name: Build unified llama binary
         run: |
-          cmake --build build --target llama -j2
+          cmake --build build --target llama-app -j2
+
+      - name: Verify binary
+        run: |
+          ls -lh build/bin/
+          file build/bin/llama
 
       - name: Prepare artifact
         run: |
           mkdir -p release
-          cp build/bin/llama release/
+          cp build/bin/llama release/llama
           chmod +x release/llama
 
       - name: Package
