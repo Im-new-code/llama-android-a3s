@@ -1,0 +1,68 @@
+name: Build llama.cpp for Android API 27 ARM64
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build unzip wget
+
+      - name: Download Android NDK r27d
+        run: |
+          wget -q https://dl.google.com/android/repository/android-ndk-r27d-linux.zip
+          unzip -q android-ndk-r27d-linux.zip
+          echo "ANDROID_NDK=$GITHUB_WORKSPACE/android-ndk-r27d" >> "$GITHUB_ENV"
+
+      - name: Clone llama.cpp
+        run: |
+          git clone --depth 1 https://github.com/ggml-org/llama.cpp.git
+
+      - name: Configure llama.cpp
+        run: |
+          cmake -S llama.cpp -B build \
+            -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-27 \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DGGML_OPENMP=OFF \
+            -DGGML_OPENCL=OFF \
+            -DGGML_VULKAN=OFF \
+            -DGGML_METAL=OFF \
+            -DGGML_CUDA=OFF \
+            -DGGML_RPC=OFF \
+            -DLLAMA_BUILD_TESTS=OFF \
+            -DLLAMA_BUILD_EXAMPLES=ON \
+            -DLLAMA_BUILD_SERVER=OFF
+
+      - name: Build llama-cli
+        run: |
+          cmake --build build --target llama-cli -j2
+
+      - name: Prepare release files
+        run: |
+          mkdir -p release
+          cp build/bin/llama-cli release/
+          cp llama.cpp/LICENSE release/
+          chmod +x release/llama-cli
+
+      - name: Package
+        run: |
+          cd release
+          zip -9 ../llama-cli-android-arm64-api27.zip llama-cli LICENSE
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: llama-cli-android-arm64-api27
+          path: llama-cli-android-arm64-api27.zip
+          retention-days: 7
