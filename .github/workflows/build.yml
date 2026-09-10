@@ -44,25 +44,25 @@ jobs:
             -DLLAMA_BUILD_EXAMPLES=ON \
             -DLLAMA_BUILD_SERVER=OFF
 
-      - name: Build llama-cli
+      - name: Build llama-app
         run: |
-          cmake --build build --target llama-cli -j2
+          cmake --build build --target llama-app -j2
 
       - name: Prepare release files
         run: |
           mkdir -p release
-          cp build/bin/llama-cli release/
+          cp build/bin/llama-app release/
           cp llama.cpp/LICENSE release/
-          chmod +x release/llama-cli
+          chmod +x release/llama-app
 
       - name: Package
         run: |
           cd release
-          zip -9 ../llama-cli-android-arm64-api27.zip llama-cli LICENSE
+          zip -9 ../llama-app-android-arm64-api27.zip llama-app LICENSE
 
       - name: Upload binary
         uses: actions/upload-artifact@v4
         with:
-          name: llama-cli-android-arm64-api27
-          path: llama-cli-android-arm64-api27.zip
+          name: llama-app-android-arm64-api27
+          path: llama-app-android-arm64-api27.zip
           retention-days: 7
