@@ -1,4 +1,4 @@
-name: Build Minimal llama-cli for Android A3s
+name: Build Minimal llama.cpp for Android 8.1 ARM64
 
 on:
   workflow_dispatch:
@@ -8,28 +8,25 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install dependencies
+      - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build unzip wget git file
+          sudo apt-get install -y cmake ninja-build unzip wget
 
       - name: Download Android NDK r27d
         run: |
           wget -q https://dl.google.com/android/repository/android-ndk-r27d-linux.zip
           unzip -q android-ndk-r27d-linux.zip
-          echo "ANDROID_NDK=$GITHUB_WORKSPACE/android-ndk-r27d" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK=$PWD/android-ndk-r27d" >> "$GITHUB_ENV"
 
-      - name: Clone llama.cpp
+      - name: Clone verified llama.cpp revision
         run: |
-          git clone --depth 1 --branch b4650 https://github.com/ggml-org/llama.cpp.git
+          git clone --depth 1 --branch b7172 https://github.com/ggml-org/llama.cpp.git
 
-      - name: Configure
+      - name: Configure minimal ARM64 Android build
+        working-directory: llama.cpp
         run: |
-          cmake -S llama.cpp -B build \
-            -G Ninja \
+          cmake -S . -B build -G Ninja \
             -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK/build/cmake/android.toolchain.cmake" \
             -DANDROID_ABI=arm64-v8a \
             -DANDROID_PLATFORM=android-27 \
@@ -45,46 +42,41 @@ jobs:
             -DGGML_CUDA=OFF \
             -DGGML_METAL=OFF \
             -DGGML_RPC=OFF \
+            -DGGML_LLAMAFILE=OFF \
+            -DLLAMA_BUILD_COMMON=ON \
             -DLLAMA_BUILD_TESTS=OFF \
-            -DLLAMA_BUILD_EXAMPLES=OFF \
             -DLLAMA_BUILD_TOOLS=ON \
+            -DLLAMA_BUILD_EXAMPLES=OFF \
             -DLLAMA_BUILD_SERVER=OFF \
-            -DLLAMA_BUILD_APP=OFF \
+            -DLLAMA_TOOLS_INSTALL=OFF \
+            -DLLAMA_CURL=OFF \
+            -DLLAMA_HTTPLIB=OFF \
             -DLLAMA_OPENSSL=OFF
 
-      - name: Build llama-cli
+      - name: Build only llama-cli
+        working-directory: llama.cpp
         run: |
           cmake --build build --target llama-cli -j2
 
-      - name: Find executable
+      - name: Strip executable
         run: |
-          find build -type f -name "llama-cli" -print
-
-      - name: Strip
-        run: |
-          mkdir -p release
-          cp "$(find build -type f -name llama-cli -perm -111 | head -n 1)" release/llama
           "$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip" \
-            --strip-all release/llama
+            --strip-all llama.cpp/build/bin/llama-cli
 
-      - name: Verify
+      - name: Check binary
         run: |
-          file release/llama
-          ls -lh release/llama
+          ls -lh llama.cpp/build/bin/llama-cli
+          file llama.cpp/build/bin/llama-cli
 
-      - name: Package
+      - name: Package binary
         run: |
-          cd release
-          zip -9 ../llama-a3s-minimal.zip llama
+          mkdir -p output
+          cp llama.cpp/build/bin/llama-cli output/llama-cli
+          cd output
+          zip -9 ../llama-cli-android-arm64-api27.zip llama-cli
 
-      - name: Show size
-        run: |
-          ls -lh release/llama
-          ls -lh llama-a3s-minimal.zip
-
-      - name: Upload
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: llama-a3s-minimal
-          path: llama-a3s-minimal.zip
-          retention-days: 7
+          name: llama-cli-android-arm64-api27
+          path: llama-cli-android-arm64-api27.zip
