@@ -316,7 +316,6 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onCreate(Bundle state) {
-
         super.onCreate(state);
 
         if (Build.VERSION.SDK_INT >= 23 &&
@@ -333,14 +332,11 @@ public class MainActivity extends Activity {
         }
 
         buildUi();
-
         extractBinary();
-
         findModel();
     }
 
     private int dp(int value) {
-
         return (int)(
                 value *
                 getResources()
@@ -524,8 +520,6 @@ public class MainActivity extends Activity {
                 Color.GRAY
         );
 
-        input.setSingleLine(false);
-
         inputBar.addView(
                 input,
                 new LinearLayout.LayoutParams(
@@ -605,41 +599,25 @@ public class MainActivity extends Activity {
         } catch (Exception e) {
 
             status.setText(
-                    "Binary error: " + e.getMessage()
+                    "Binary error: " +
+                    e.getMessage()
             );
         }
     }
 
     private void findModel() {
 
-        ArrayList<File> candidates =
-                new ArrayList<>();
+        String[] paths = {
+            "/storage/emulated/0/AI-Models/qwen3-0.6b-q4_k_m.gguf",
+            "/sdcard/AI-Models/qwen3-0.6b-q4_k_m.gguf",
+            "/storage/6D3D-1AFB/Android/data/com.termux/files/home/storage/external-1/AI-Models/qwen3-0.6b-q4_k_m.gguf",
+            "/storage/6D3D-1AFB/Android/data/com.termux/files/home/storage/shared/AI-Models/qwen3-0.6b-q4_k_m.gguf"
+        };
 
-        candidates.add(
-                new File(
-                        "/storage/emulated/0/AI-Models/qwen3-0.6b-q4_k_m.gguf"
-                )
-        );
+        for (String path : paths) {
 
-        candidates.add(
-                new File(
-                        "/sdcard/AI-Models/qwen3-0.6b-q4_k_m.gguf"
-                )
-        );
-
-        candidates.add(
-                new File(
-                        "/storage/6D3D-1AFB/Android/data/com.termux/files/home/storage/external-1/AI-Models/qwen3-0.6b-q4_k_m.gguf"
-                )
-        );
-
-        candidates.add(
-                new File(
-                        "/storage/6D3D-1AFB/Android/data/com.termux/files/home/storage/shared/AI-Models/qwen3-0.6b-q4_k_m.gguf"
-                )
-        );
-
-        for (File candidate : candidates) {
+            File candidate =
+                    new File(path);
 
             if (candidate.isFile() &&
                 candidate.length() > 100000000) {
@@ -661,10 +639,6 @@ public class MainActivity extends Activity {
 
     private void sendMessage() {
 
-        if (generating.get()) {
-            return;
-        }
-
         if (modelFile == null ||
             !modelFile.isFile()) {
 
@@ -674,8 +648,7 @@ public class MainActivity extends Activity {
 
                 addMessage(
                         "JARVIS",
-                        "I cannot find the Qwen3 GGUF model. " +
-                        "Place qwen3-0.6b-q4_k_m.gguf in an accessible AI-Models folder."
+                        "I cannot find the Qwen3 GGUF model."
                 );
 
                 return;
@@ -707,10 +680,7 @@ public class MainActivity extends Activity {
         generating.set(true);
 
         sendButton.setText("STOP");
-
-        status.setText(
-                "Generating..."
-        );
+        status.setText("Generating...");
 
         Thread worker =
                 new Thread(() -> {
@@ -731,7 +701,9 @@ public class MainActivity extends Activity {
                         );
 
                         command.add("-m");
-                        command.add(modelFile.getAbsolutePath());
+                        command.add(
+                                modelFile.getAbsolutePath()
+                        );
 
                         command.add("-p");
 
@@ -753,9 +725,13 @@ public class MainActivity extends Activity {
 
                         command.add("--offline");
 
-                        command.add("--no-display-prompt");
+                        command.add(
+                                "--no-display-prompt"
+                        );
 
-                        command.add("--no-show-timings");
+                        command.add(
+                                "--no-show-timings"
+                        );
 
                         command.add("--temp");
                         command.add("0.7");
@@ -769,15 +745,15 @@ public class MainActivity extends Activity {
                         command.add("--seed");
                         command.add("-1");
 
-                        command.add("--no-conversation");
+                        ProcessBuilder builder =
+                                new ProcessBuilder(
+                                        command
+                                );
 
-                        ProcessBuilder pb =
-                                new ProcessBuilder(command);
-
-                        pb.redirectErrorStream(true);
+                        builder.redirectErrorStream(true);
 
                         process =
-                                pb.start();
+                                builder.start();
 
                         BufferedReader reader =
                                 new BufferedReader(
@@ -786,7 +762,7 @@ public class MainActivity extends Activity {
                                         )
                                 );
 
-                        StringBuilder buffer =
+                        StringBuilder output =
                                 new StringBuilder();
 
                         String line;
@@ -796,28 +772,23 @@ public class MainActivity extends Activity {
                                 (line = reader.readLine()) != null
                         ) {
 
-                            buffer.append(line);
+                            output.append(line);
+                            output.append('\n');
 
-                            buffer.append('\n');
-
-                            String current =
+                            final String text =
                                     cleanOutput(
-                                            buffer.toString()
+                                            output.toString()
                                     );
-
-                            final String output =
-                                    current;
 
                             handler.post(() -> {
 
-                                answer.setText(
-                                        output
-                                );
+                                answer.setText(text);
 
                                 scroll.post(
-                                        () -> scroll.fullScroll(
+                                        () ->
+                                            scroll.fullScroll(
                                                 View.FOCUS_DOWN
-                                        )
+                                            )
                                 );
                             });
                         }
@@ -825,9 +796,9 @@ public class MainActivity extends Activity {
                         int exit =
                                 process.waitFor();
 
-                        String finalText =
+                        final String finalText =
                                 cleanOutput(
-                                        buffer.toString()
+                                        output.toString()
                                 );
 
                         handler.post(() -> {
@@ -894,8 +865,7 @@ public class MainActivity extends Activity {
     private String cleanOutput(
             String value) {
 
-        String result =
-                value;
+        String result = value;
 
         result =
                 result.replace(
@@ -909,31 +879,31 @@ public class MainActivity extends Activity {
                         ""
                 );
 
-        int thinkStart =
+        int start =
                 result.indexOf("<think>");
 
-        while (thinkStart >= 0) {
+        while (start >= 0) {
 
-            int thinkEnd =
+            int end =
                     result.indexOf(
                             "</think>",
-                            thinkStart
+                            start
                     );
 
-            if (thinkEnd < 0) {
+            if (end < 0) {
                 break;
             }
 
             result =
                     result.substring(
                             0,
-                            thinkStart
+                            start
                     ) +
                     result.substring(
-                            thinkEnd + 8
+                            end + 8
                     );
 
-            thinkStart =
+            start =
                     result.indexOf("<think>");
         }
 
@@ -958,28 +928,13 @@ public class MainActivity extends Activity {
                 dp(10)
         );
 
-        LinearLayout.LayoutParams params =
-                new LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.WRAP_CONTENT
-                );
-
-        params.setMargins(
-                0,
-                dp(5),
-                0,
-                dp(5)
-        );
-
-        messages.addView(
-                view,
-                params
-        );
+        messages.addView(view);
 
         scroll.post(
-                () -> scroll.fullScroll(
+                () ->
+                    scroll.fullScroll(
                         View.FOCUS_DOWN
-                )
+                    )
         );
 
         return view;
@@ -989,13 +944,10 @@ public class MainActivity extends Activity {
 
         generating.set(false);
 
-        Process current =
-                process;
-
-        if (current != null) {
+        if (process != null) {
 
             try {
-                current.destroy();
+                process.destroy();
             } catch (Exception ignored) {
             }
         }
