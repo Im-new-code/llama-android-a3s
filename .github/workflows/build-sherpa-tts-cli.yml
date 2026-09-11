@@ -1,0 +1,55 @@
+name: Build Sherpa ONNX Android ARM64 TTS CLI
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout Sherpa ONNX
+        uses: actions/checkout@v4
+        with:
+          repository: k2-fsa/sherpa-onnx
+          fetch-depth: 1
+
+      - name: Setup Android NDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install NDK
+        run: |
+          sdkmanager "ndk;27.2.12479018"
+
+      - name: Build Android ARM64
+        env:
+          ANDROID_NDK: ${{ env.ANDROID_NDK_HOME }}/27.2.12479018
+          SHERPA_ONNX_ENABLE_TTS: ON
+          SHERPA_ONNX_ENABLE_BINARY: ON
+          SHERPA_ONNX_ENABLE_JNI: OFF
+          SHERPA_ONNX_ENABLE_PYTHON: OFF
+          SHERPA_ONNX_ENABLE_TESTS: OFF
+          SHERPA_ONNX_ENABLE_CHECK: OFF
+          SHERPA_ONNX_ENABLE_PORTAUDIO: OFF
+        run: |
+          chmod +x build-android-arm64-v8a.sh
+          ./build-android-arm64-v8a.sh
+
+      - name: Check output
+        run: |
+          file build-android-arm64-v8a/install/bin/sherpa-onnx-offline-tts
+          ls -lh build-android-arm64-v8a/install/bin/
+          ls -lh build-android-arm64-v8a/install/lib/
+
+      - name: Package TTS CLI
+        run: |
+          mkdir -p package
+          cp build-android-arm64-v8a/install/bin/sherpa-onnx-offline-tts package/
+          cp build-android-arm64-v8a/install/lib/libonnxruntime.so package/
+          tar -cjf sherpa-tts-android-arm64.tar.bz2 -C package .
+
+      - name: Upload TTS CLI
+        uses: actions/upload-artifact@v4
+        with:
+          name: sherpa-tts-android-arm64
+          path: sherpa-tts-android-arm64.tar.bz2
