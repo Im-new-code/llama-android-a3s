@@ -27,16 +27,25 @@ jobs:
       - name: Build Android ARM64
         run: |
           export ANDROID_NDK="$ANDROID_HOME/ndk/27.2.12479018"
-          echo "Using ANDROID_NDK=$ANDROID_NDK"
+          export SHERPA_ONNX_ENABLE_TTS=ON
+          export SHERPA_ONNX_ENABLE_BINARY=ON
+          export SHERPA_ONNX_ENABLE_JNI=OFF
+          export SHERPA_ONNX_ENABLE_PYTHON=OFF
+          export SHERPA_ONNX_ENABLE_TESTS=OFF
+          export SHERPA_ONNX_ENABLE_CHECK=OFF
+          export SHERPA_ONNX_ENABLE_PORTAUDIO=OFF
+          export SHERPA_ONNX_ENABLE_SPEAKER_DIARIZATION=OFF
+
+          echo "ANDROID_NDK=$ANDROID_NDK"
+          echo "SHERPA_ONNX_ENABLE_BINARY=$SHERPA_ONNX_ENABLE_BINARY"
 
           chmod +x build-android-arm64-v8a.sh
           ./build-android-arm64-v8a.sh
 
       - name: Check output
         run: |
+          find build-android-arm64-v8a/install -maxdepth 3 -type f -exec ls -lh {} \;
           file build-android-arm64-v8a/install/bin/sherpa-onnx-offline-tts
-          ls -lh build-android-arm64-v8a/install/bin/
-          ls -lh build-android-arm64-v8a/install/lib/
 
       - name: Package TTS CLI
         run: |
