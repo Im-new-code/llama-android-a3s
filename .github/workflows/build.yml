@@ -1,13 +1,1038 @@
-name: JARVIS Android Build
+name: Build JARVIS Android APK
 
-on: workflow_dispatch
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
-  test:
+  build:
+    name: Build JARVIS for Android ARM64
     runs-on: ubuntu-24.04
 
+    env:
+      ANDROID_API: "27"
+      LLAMA_CPP_COMMIT: "b78db3b"
+      GRADLE_VERSION: "8.7"
+
     steps:
-      - name: Test workflow
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v4
+
+      - name: Install Android SDK
         run: |
-          echo "JARVIS workflow is recognized."
-          echo "GitHub Actions is working."
+          yes | sdkmanager --licenses >/dev/null || true
+
+          sdkmanager \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0" \
+            "cmake;3.22.1"
+
+      - name: Download Android NDK r27d
+        run: |
+          wget -q \
+            https://dl.google.com/android/repository/android-ndk-r27d-linux.zip
+
+          unzip -q android-ndk-r27d-linux.zip
+
+          echo "ANDROID_NDK=$GITHUB_WORKSPACE/android-ndk-r27d" >> "$GITHUB_ENV"
+
+      - name: Download Gradle
+        run: |
+          wget -q \
+            https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip
+
+          unzip -q \
+            gradle-${GRADLE_VERSION}-bin.zip \
+            -d "$RUNNER_TEMP"
+
+          echo "$RUNNER_TEMP/gradle-${GRADLE_VERSION}/bin" >> "$GITHUB_PATH"
+
+      - name: Clone llama.cpp
+        run: |
+          git clone --depth 1 \
+            https://github.com/ggml-org/llama.cpp.git
+
+          cd llama.cpp
+
+          git fetch --depth 1 origin "$LLAMA_CPP_COMMIT"
+
+          git checkout "$LLAMA_CPP_COMMIT"
+
+          git rev-parse HEAD
+
+      - name: Configure llama.cpp
+        run: |
+          cmake \
+            -S llama.cpp \
+            -B llama-build \
+            -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-${ANDROID_API} \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DGGML_OPENMP=OFF \
+            -DGGML_OPENCL=OFF \
+            -DGGML_VULKAN=OFF \
+            -DGGML_METAL=OFF \
+            -DGGML_CUDA=OFF \
+            -DGGML_RPC=OFF \
+            -DGGML_NATIVE=OFF \
+            -DGGML_LLAMAFILE=OFF \
+            -DLLAMA_OPENSSL=OFF \
+            -DLLAMA_BUILD_COMMON=ON \
+            -DLLAMA_BUILD_TOOLS=ON \
+            -DLLAMA_BUILD_SERVER=OFF \
+            -DLLAMA_BUILD_APP=OFF \
+            -DLLAMA_BUILD_TESTS=OFF \
+            -DLLAMA_BUILD_EXAMPLES=OFF
+
+      - name: Build llama-cli
+        run: |
+          cmake \
+            --build llama-build \
+            --target llama-cli \
+            -j2
+
+          test -f llama-build/bin/llama-cli
+
+          file llama-build/bin/llama-cli
+
+          chmod +x llama-build/bin/llama-cli
+
+      - name: Generate Android project
+        shell: bash
+        run: |
+          set -e
+
+          mkdir -p app/src/main/java/com/imnewcode/jarvis
+          mkdir -p app/src/main/res/values
+          mkdir -p app/src/main/assets
+
+          cp llama-build/bin/llama-cli app/src/main/assets/llama-cli
+
+          cat > settings.gradle <<'EOF'
+pluginManagement {
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+rootProject.name = "JARVIS"
+
+include(":app")
+EOF
+
+          cat > build.gradle <<'EOF'
+plugins {
+    id 'com.android.application' version '8.5.2' apply false
+}
+EOF
+
+          cat > gradle.properties <<'EOF'
+org.gradle.jvmargs=-Xmx2g -Dfile.encoding=UTF-8
+android.useAndroidX=false
+android.enableJetifier=false
+EOF
+
+          cat > app/build.gradle <<'EOF'
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.imnewcode.jarvis'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'com.imnewcode.jarvis'
+        minSdk 27
+        targetSdk 28
+        versionCode 1
+        versionName '0.1.0'
+
+        ndk {
+            abiFilters 'arm64-v8a'
+        }
+    }
+
+    buildTypes {
+        debug {
+            minifyEnabled false
+        }
+
+        release {
+            minifyEnabled false
+            shrinkResources false
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    packagingOptions {
+        resources {
+            excludes += [
+                'META-INF/DEPENDENCIES',
+                'META-INF/LICENSE',
+                'META-INF/LICENSE.txt',
+                'META-INF/NOTICE',
+                'META-INF/NOTICE.txt'
+            ]
+        }
+    }
+}
+EOF
+
+          cat > app/src/main/AndroidManifest.xml <<'EOF'
+<?xml version="1.0" encoding="utf-8"?>
+
+<manifest
+    xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE" />
+
+    <application
+        android:allowBackup="false"
+        android:label="JARVIS"
+        android:theme="@style/AppTheme"
+        android:usesCleartextTraffic="false">
+
+        <activity
+            android:name=".MainActivity"
+            android:screenOrientation="portrait"
+            android:exported="true">
+
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+        </activity>
+
+    </application>
+
+</manifest>
+EOF
+
+          cat > app/src/main/res/values/styles.xml <<'EOF'
+<?xml version="1.0" encoding="utf-8"?>
+
+<resources>
+
+    <style
+        name="AppTheme"
+        parent="@android:style/Theme.Material.NoActionBar">
+
+        <item name="android:fontFamily">sans</item>
+        <item name="android:colorAccent">#8AB4F8</item>
+        <item name="android:navigationBarColor">#08090C</item>
+        <item name="android:statusBarColor">#08090C</item>
+        <item name="android:windowLightStatusBar">false</item>
+
+    </style>
+
+</resources>
+EOF
+
+          cat > app/src/main/java/com/imnewcode/jarvis/MainActivity.java <<'EOF'
+package com.imnewcode.jarvis;
+
+import android.Manifest;
+import android.app.Activity;
+import android.os.Bundle;
+import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
+import android.content.pm.PackageManager;
+import android.graphics.Color;
+import android.graphics.Typeface;
+import android.view.Gravity;
+import android.view.View;
+import android.view.ViewGroup;
+import android.widget.*;
+
+import java.io.*;
+import java.util.*;
+import java.util.concurrent.atomic.AtomicBoolean;
+
+public class MainActivity extends Activity {
+
+    private LinearLayout messages;
+    private ScrollView scroll;
+
+    private EditText input;
+    private Button sendButton;
+    private TextView status;
+    private TextView modelStatus;
+
+    private final Handler handler =
+            new Handler(Looper.getMainLooper());
+
+    private Process process;
+
+    private final AtomicBoolean generating =
+            new AtomicBoolean(false);
+
+    private File modelFile;
+
+    private static final int REQUEST_STORAGE = 1001;
+
+    private static final String SYSTEM_PROMPT =
+            "You are JARVIS, a helpful offline personal AI assistant. " +
+            "Answer the user's actual question directly. " +
+            "Be clear and natural. " +
+            "Be concise for simple questions and explain properly when needed. " +
+            "You are completely offline. " +
+            "Do not claim to have internet access. " +
+            "Do not output hidden reasoning or <think> sections.";
+
+    @Override
+    protected void onCreate(Bundle state) {
+
+        super.onCreate(state);
+
+        if (Build.VERSION.SDK_INT >= 23 &&
+            checkSelfPermission(
+                Manifest.permission.READ_EXTERNAL_STORAGE
+            ) != PackageManager.PERMISSION_GRANTED) {
+
+            requestPermissions(
+                    new String[]{
+                            Manifest.permission.READ_EXTERNAL_STORAGE
+                    },
+                    REQUEST_STORAGE
+            );
+        }
+
+        buildUi();
+
+        extractBinary();
+
+        findModel();
+    }
+
+    private int dp(int value) {
+
+        return (int)(
+                value *
+                getResources()
+                .getDisplayMetrics()
+                .density
+        );
+    }
+
+    private TextView makeText(
+            String value,
+            float size,
+            int color) {
+
+        TextView view = new TextView(this);
+
+        view.setText(value);
+        view.setTextSize(size);
+        view.setTextColor(color);
+
+        return view;
+    }
+
+    private void buildUi() {
+
+        LinearLayout root =
+                new LinearLayout(this);
+
+        root.setOrientation(
+                LinearLayout.VERTICAL
+        );
+
+        root.setBackgroundColor(
+                Color.rgb(8, 9, 12)
+        );
+
+        LinearLayout header =
+                new LinearLayout(this);
+
+        header.setOrientation(
+                LinearLayout.HORIZONTAL
+        );
+
+        header.setGravity(
+                Gravity.CENTER_VERTICAL
+        );
+
+        header.setPadding(
+                dp(18),
+                dp(12),
+                dp(14),
+                dp(12)
+        );
+
+        TextView title =
+                makeText(
+                        "JARVIS",
+                        21,
+                        Color.WHITE
+                );
+
+        title.setTypeface(
+                Typeface.DEFAULT_BOLD
+        );
+
+        header.addView(
+                title,
+                new LinearLayout.LayoutParams(
+                        0,
+                        ViewGroup.LayoutParams.WRAP_CONTENT,
+                        1
+                )
+        );
+
+        TextView offline =
+                makeText(
+                        "● OFFLINE",
+                        12,
+                        Color.rgb(120, 220, 150)
+                );
+
+        header.addView(offline);
+
+        root.addView(
+                header,
+                new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT
+                )
+        );
+
+        modelStatus =
+                makeText(
+                        "Model: searching...",
+                        12,
+                        Color.LTGRAY
+                );
+
+        modelStatus.setPadding(
+                dp(14),
+                dp(6),
+                dp(14),
+                dp(6)
+        );
+
+        root.addView(modelStatus);
+
+        scroll =
+                new ScrollView(this);
+
+        messages =
+                new LinearLayout(this);
+
+        messages.setOrientation(
+                LinearLayout.VERTICAL
+        );
+
+        messages.setPadding(
+                dp(12),
+                dp(12),
+                dp(12),
+                dp(12)
+        );
+
+        scroll.addView(messages);
+
+        root.addView(
+                scroll,
+                new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        0,
+                        1
+                )
+        );
+
+        status =
+                makeText(
+                        "Ready",
+                        11,
+                        Color.GRAY
+                );
+
+        status.setPadding(
+                dp(14),
+                dp(4),
+                dp(14),
+                dp(4)
+        );
+
+        root.addView(status);
+
+        LinearLayout inputBar =
+                new LinearLayout(this);
+
+        inputBar.setOrientation(
+                LinearLayout.HORIZONTAL
+        );
+
+        inputBar.setGravity(
+                Gravity.CENTER_VERTICAL
+        );
+
+        inputBar.setPadding(
+                dp(8),
+                dp(6),
+                dp(8),
+                dp(8)
+        );
+
+        input =
+                new EditText(this);
+
+        input.setHint(
+                "Ask anything..."
+        );
+
+        input.setTextColor(
+                Color.WHITE
+        );
+
+        input.setHintTextColor(
+                Color.GRAY
+        );
+
+        input.setSingleLine(false);
+
+        inputBar.addView(
+                input,
+                new LinearLayout.LayoutParams(
+                        0,
+                        dp(52),
+                        1
+                )
+        );
+
+        sendButton =
+                new Button(this);
+
+        sendButton.setText(
+                "SEND"
+        );
+
+        sendButton.setOnClickListener(
+                v -> {
+
+                    if (generating.get()) {
+                        stopGeneration();
+                    } else {
+                        sendMessage();
+                    }
+                }
+        );
+
+        inputBar.addView(
+                sendButton,
+                new LinearLayout.LayoutParams(
+                        dp(92),
+                        dp(52)
+                )
+        );
+
+        root.addView(inputBar);
+
+        setContentView(root);
+    }
+
+    private void extractBinary() {
+
+        File target =
+                new File(
+                        getFilesDir(),
+                        "llama-cli"
+                );
+
+        if (target.exists()) {
+            target.setExecutable(true);
+            return;
+        }
+
+        try {
+
+            InputStream in =
+                    getAssets()
+                    .open("llama-cli");
+
+            FileOutputStream out =
+                    new FileOutputStream(target);
+
+            byte[] buffer =
+                    new byte[8192];
+
+            int count;
+
+            while ((count = in.read(buffer)) != -1) {
+                out.write(buffer, 0, count);
+            }
+
+            out.close();
+            in.close();
+
+            target.setExecutable(true);
+
+        } catch (Exception e) {
+
+            status.setText(
+                    "Binary error: " + e.getMessage()
+            );
+        }
+    }
+
+    private void findModel() {
+
+        ArrayList<File> candidates =
+                new ArrayList<>();
+
+        candidates.add(
+                new File(
+                        "/storage/emulated/0/AI-Models/qwen3-0.6b-q4_k_m.gguf"
+                )
+        );
+
+        candidates.add(
+                new File(
+                        "/sdcard/AI-Models/qwen3-0.6b-q4_k_m.gguf"
+                )
+        );
+
+        candidates.add(
+                new File(
+                        "/storage/6D3D-1AFB/Android/data/com.termux/files/home/storage/external-1/AI-Models/qwen3-0.6b-q4_k_m.gguf"
+                )
+        );
+
+        candidates.add(
+                new File(
+                        "/storage/6D3D-1AFB/Android/data/com.termux/files/home/storage/shared/AI-Models/qwen3-0.6b-q4_k_m.gguf"
+                )
+        );
+
+        for (File candidate : candidates) {
+
+            if (candidate.isFile() &&
+                candidate.length() > 100000000) {
+
+                modelFile = candidate;
+
+                modelStatus.setText(
+                        "Model: Qwen3 0.6B detected"
+                );
+
+                return;
+            }
+        }
+
+        modelStatus.setText(
+                "Model: not found"
+        );
+    }
+
+    private void sendMessage() {
+
+        if (generating.get()) {
+            return;
+        }
+
+        if (modelFile == null ||
+            !modelFile.isFile()) {
+
+            findModel();
+
+            if (modelFile == null) {
+
+                addMessage(
+                        "JARVIS",
+                        "I cannot find the Qwen3 GGUF model. " +
+                        "Place qwen3-0.6b-q4_k_m.gguf in an accessible AI-Models folder."
+                );
+
+                return;
+            }
+        }
+
+        String question =
+                input.getText()
+                .toString()
+                .trim();
+
+        if (question.length() == 0) {
+            return;
+        }
+
+        input.setText("");
+
+        addMessage(
+                "You",
+                question
+        );
+
+        TextView answer =
+                addMessage(
+                        "JARVIS",
+                        ""
+                );
+
+        generating.set(true);
+
+        sendButton.setText("STOP");
+
+        status.setText(
+                "Generating..."
+        );
+
+        Thread worker =
+                new Thread(() -> {
+
+                    try {
+
+                        File binary =
+                                new File(
+                                        getFilesDir(),
+                                        "llama-cli"
+                                );
+
+                        ArrayList<String> command =
+                                new ArrayList<>();
+
+                        command.add(
+                                binary.getAbsolutePath()
+                        );
+
+                        command.add("-m");
+                        command.add(modelFile.getAbsolutePath());
+
+                        command.add("-p");
+
+                        command.add(
+                                buildPrompt(question)
+                        );
+
+                        command.add("-n");
+                        command.add("256");
+
+                        command.add("--ctx-size");
+                        command.add("1536");
+
+                        command.add("--threads");
+                        command.add("4");
+
+                        command.add("--batch-size");
+                        command.add("256");
+
+                        command.add("--offline");
+
+                        command.add("--no-display-prompt");
+
+                        command.add("--no-show-timings");
+
+                        command.add("--temp");
+                        command.add("0.7");
+
+                        command.add("--top-k");
+                        command.add("40");
+
+                        command.add("--top-p");
+                        command.add("0.9");
+
+                        command.add("--seed");
+                        command.add("-1");
+
+                        command.add("--no-conversation");
+
+                        ProcessBuilder pb =
+                                new ProcessBuilder(command);
+
+                        pb.redirectErrorStream(true);
+
+                        process =
+                                pb.start();
+
+                        BufferedReader reader =
+                                new BufferedReader(
+                                        new InputStreamReader(
+                                                process.getInputStream()
+                                        )
+                                );
+
+                        StringBuilder buffer =
+                                new StringBuilder();
+
+                        String line;
+
+                        while (
+                                generating.get() &&
+                                (line = reader.readLine()) != null
+                        ) {
+
+                            buffer.append(line);
+
+                            buffer.append('\n');
+
+                            String current =
+                                    cleanOutput(
+                                            buffer.toString()
+                                    );
+
+                            final String output =
+                                    current;
+
+                            handler.post(() -> {
+
+                                answer.setText(
+                                        output
+                                );
+
+                                scroll.post(
+                                        () -> scroll.fullScroll(
+                                                View.FOCUS_DOWN
+                                        )
+                                );
+                            });
+                        }
+
+                        int exit =
+                                process.waitFor();
+
+                        String finalText =
+                                cleanOutput(
+                                        buffer.toString()
+                                );
+
+                        handler.post(() -> {
+
+                            answer.setText(
+                                    finalText.length() == 0
+                                            ? "No response."
+                                            : finalText
+                            );
+
+                            status.setText(
+                                    exit == 0
+                                            ? "Ready"
+                                            : "Process exited: " + exit
+                            );
+
+                            sendButton.setText(
+                                    "SEND"
+                            );
+
+                            generating.set(false);
+                        });
+
+                    } catch (Exception e) {
+
+                        final String error =
+                                e.getMessage();
+
+                        handler.post(() -> {
+
+                            answer.setText(
+                                    "Error: " + error
+                            );
+
+                            status.setText(
+                                    "Error"
+                            );
+
+                            sendButton.setText(
+                                    "SEND"
+                            );
+
+                            generating.set(false);
+                        });
+                    }
+                });
+
+        worker.start();
+    }
+
+    private String buildPrompt(
+            String question) {
+
+        return
+                "<|im_start|>system\n" +
+                SYSTEM_PROMPT +
+                "<|im_end|>\n" +
+                "<|im_start|>user\n" +
+                question +
+                "<|im_end|>\n" +
+                "<|im_start|>assistant\n";
+    }
+
+    private String cleanOutput(
+            String value) {
+
+        String result =
+                value;
+
+        result =
+                result.replace(
+                        "<|im_end|>",
+                        ""
+                );
+
+        result =
+                result.replace(
+                        "<|endoftext|>",
+                        ""
+                );
+
+        int thinkStart =
+                result.indexOf("<think>");
+
+        while (thinkStart >= 0) {
+
+            int thinkEnd =
+                    result.indexOf(
+                            "</think>",
+                            thinkStart
+                    );
+
+            if (thinkEnd < 0) {
+                break;
+            }
+
+            result =
+                    result.substring(
+                            0,
+                            thinkStart
+                    ) +
+                    result.substring(
+                            thinkEnd + 8
+                    );
+
+            thinkStart =
+                    result.indexOf("<think>");
+        }
+
+        return result.trim();
+    }
+
+    private TextView addMessage(
+            String speaker,
+            String content) {
+
+        TextView view =
+                makeText(
+                        speaker + "\n" + content,
+                        16,
+                        Color.WHITE
+                );
+
+        view.setPadding(
+                dp(14),
+                dp(10),
+                dp(14),
+                dp(10)
+        );
+
+        LinearLayout.LayoutParams params =
+                new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT
+                );
+
+        params.setMargins(
+                0,
+                dp(5),
+                0,
+                dp(5)
+        );
+
+        messages.addView(
+                view,
+                params
+        );
+
+        scroll.post(
+                () -> scroll.fullScroll(
+                        View.FOCUS_DOWN
+                )
+        );
+
+        return view;
+    }
+
+    private void stopGeneration() {
+
+        generating.set(false);
+
+        Process current =
+                process;
+
+        if (current != null) {
+
+            try {
+                current.destroy();
+            } catch (Exception ignored) {
+            }
+        }
+
+        process = null;
+
+        sendButton.setText(
+                "SEND"
+        );
+
+        status.setText(
+                "Stopped"
+        );
+    }
+
+    @Override
+    protected void onDestroy() {
+
+        stopGeneration();
+
+        super.onDestroy();
+    }
+}
+EOF
+
+      - name: Build APK
+        run: |
+          gradle --no-daemon assembleDebug
+
+      - name: Verify APK
+        run: |
+          ls -lh app/build/outputs/apk/debug/app-debug.apk
+          file app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: JARVIS-A3S-v0.1.0
+          path: app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 14
