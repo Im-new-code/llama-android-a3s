@@ -14,24 +14,21 @@ jobs:
           repository: k2-fsa/sherpa-onnx
           fetch-depth: 1
 
-      - name: Setup Android NDK
+      - name: Setup Android
         uses: android-actions/setup-android@v3
 
-      - name: Install NDK
+      - name: Install Android NDK
         run: |
           sdkmanager "ndk;27.2.12479018"
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "NDK=$ANDROID_HOME/ndk/27.2.12479018"
+          test -d "$ANDROID_HOME/ndk/27.2.12479018"
 
       - name: Build Android ARM64
-        env:
-          ANDROID_NDK: ${{ env.ANDROID_NDK_HOME }}/27.2.12479018
-          SHERPA_ONNX_ENABLE_TTS: ON
-          SHERPA_ONNX_ENABLE_BINARY: ON
-          SHERPA_ONNX_ENABLE_JNI: OFF
-          SHERPA_ONNX_ENABLE_PYTHON: OFF
-          SHERPA_ONNX_ENABLE_TESTS: OFF
-          SHERPA_ONNX_ENABLE_CHECK: OFF
-          SHERPA_ONNX_ENABLE_PORTAUDIO: OFF
         run: |
+          export ANDROID_NDK="$ANDROID_HOME/ndk/27.2.12479018"
+          echo "Using ANDROID_NDK=$ANDROID_NDK"
+
           chmod +x build-android-arm64-v8a.sh
           ./build-android-arm64-v8a.sh
 
