@@ -3,8 +3,12 @@ name: Build JARVIS Android
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   build:
+    name: Build JARVIS APK
     runs-on: ubuntu-22.04
 
     steps:
@@ -16,75 +20,140 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
+          cache: gradle
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
       - name: Install Android SDK components
         run: |
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager \
+          sdkmanager --install \
             "platform-tools" \
             "platforms;android-35" \
             "build-tools;35.0.0"
+
+      - name: Verify source archive
+        run: |
+          test -f jarvis-source.zip || {
+            echo "ERROR: jarvis-source.zip was not found in repository root."
+            exit 1
+          }
+
+          echo "Source archive:"
+          ls -lh jarvis-source.zip
+
+          echo
+          echo "Archive contents:"
+          unzip -l jarvis-source.zip
 
       - name: Extract JARVIS source
         run: |
           rm -rf jarvis-src
           mkdir -p jarvis-src
+
           unzip -q jarvis-source.zip -d jarvis-src
 
-          echo "JARVIS source:"
-          find jarvis-src -maxdepth 4 -type f | sort
+          echo "Extracted project:"
+          find jarvis-src -maxdepth 3 -type f | sort
 
-      - name: Download Sherpa ONNX AAR
-        working-directory: jarvis-src
+      - name: Verify project structure
         run: |
-          wget -q \
-            "https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.8/sherpa-onnx-1.13.8.aar" \
-            -O app/sherpa-onnx.aar
+          required_files=(
+            "jarvis-src/settings.gradle"
+            "jarvis-src/build.gradle"
+            "jarvis-src/gradle.properties"
+            "jarvis-src/app/build.gradle"
+            "jarvis-src/app/src/main/AndroidManifest.xml"
+          )
 
-          echo "Sherpa AAR:"
-          ls -lh app/sherpa-onnx.aar
+          for file in "${required_files[@]}"; do
+            if [ ! -f "$file" ]; then
+              echo
+              echo "ERROR: Missing required file:"
+              echo "$file"
+              echo
+              echo "Your ZIP must contain the Android project directly at its root."
+              echo "Correct:"
+              echo "  settings.gradle"
+              echo "  build.gradle"
+              echo "  gradle.properties"
+              echo "  app/"
+              echo
+              echo "Incorrect:"
+              echo "  jarvis-source/settings.gradle"
+              echo "  jarvis-source/app/"
+              exit 1
+            fi
+          done
 
-      - name: Install Gradle
+          echo
+          echo "JARVIS project structure verified successfully."
+
+      - name: Download Sherpa ONNX
         run: |
+          SHERPA_VERSION="1.13.8"
+          SHERPA_URL="https://github.com/k2-fsa/sherpa-onnx/releases/download/v${SHERPA_VERSION}/sherpa-onnx-${SHERPA_VERSION}.aar"
+
           wget -q \
-            "https://services.gradle.org/distributions/gradle-8.7-bin.zip" \
+            --show-progress \
+            "$SHERPA_URL" \
+            -O "jarvis-src/app/sherpa-onnx.aar"
+
+          test -s "jarvis-src/app/sherpa-onnx.aar"
+
+          echo
+          echo "Sherpa ONNX AAR:"
+          ls -lh "jarvis-src/app/sherpa-onnx.aar"
+
+      - name: Install Gradle 8.7
+        run: |
+          GRADLE_VERSION="8.7"
+
+          wget -q \
+            --show-progress \
+            "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip" \
             -O /tmp/gradle.zip
 
           unzip -q /tmp/gradle.zip -d /tmp
-          echo "/tmp/gradle-8.7/bin" >> "$GITHUB_PATH"
+
+          echo "/tmp/gradle-${GRADLE_VERSION}/bin" >> "$GITHUB_PATH"
 
       - name: Generate Gradle wrapper
         working-directory: jarvis-src
         run: |
-          gradle wrapper --gradle-version 8.7
+          gradle --version
+          gradle wrapper --gradle-version 8.7 --distribution-type bin
 
-      - name: Verify project structure
+      - name: Build JARVIS debug APK
         working-directory: jarvis-src
         run: |
-          test -f settings.gradle
-          test -f build.gradle
-          test -f gradle.properties
-          test -f app/build.gradle
-          test -f app/src/main/AndroidManifest.xml
+          ./gradlew \
+            --no-daemon \
+            --stacktrace \
+            --warning-mode all \
+            assembleDebug
 
-          echo "Project structure verified."
-
-      - name: Build debug APK
-        working-directory: jarvis-src
+      - name: Verify APK exists
         run: |
-          ./gradlew --no-daemon --stacktrace assembleDebug
+          APK="jarvis-src/app/build/outputs/apk/debug/app-debug.apk"
 
-      - name: Show APK
-        working-directory: jarvis-src
-        run: |
-          find app/build/outputs/apk -type f -name "*.apk" -exec ls -lh {} \;
+          test -f "$APK" || {
+            echo "ERROR: APK was not produced."
+            find jarvis-src/app/build/outputs -type f 2>/dev/null || true
+            exit 1
+          }
 
-      - name: Upload APK
+          echo "APK successfully produced:"
+          ls -lh "$APK"
+
+          echo
+          echo "APK information:"
+          file "$APK"
+
+      - name: Upload JARVIS APK
         uses: actions/upload-artifact@v4
         with:
           name: JARVIS-debug-apk
           path: jarvis-src/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+          retention-days: 14
