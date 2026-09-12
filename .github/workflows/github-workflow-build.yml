@@ -46,9 +46,8 @@ jobs:
       - name: Build Android llama-cli for JARVIS
         run: |
           rm -rf llama.cpp
-          git clone --depth 1 https://github.com/ggml-org/llama.cpp.git
+          git clone https://github.com/ggml-org/llama.cpp.git
           cd llama.cpp
-          git fetch --depth 1 origin b78db3b
           git checkout b78db3b
           export ANDROID_NDK="$ANDROID_HOME/ndk/27.2.12479018"
           cmake \
