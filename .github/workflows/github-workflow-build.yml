@@ -60,6 +60,7 @@ jobs:
             -DGGML_OPENMP=OFF \
             -DGGML_LLAMAFILE=OFF \
             -DLLAMA_OPENSSL=OFF \
+            -DLLAMA_CURL=OFF \
             -DLLAMA_BUILD_SERVER=OFF \
             -DLLAMA_BUILD_TESTS=OFF \
             -DLLAMA_BUILD_EXAMPLES=ON \
