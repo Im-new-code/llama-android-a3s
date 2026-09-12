@@ -5,6 +5,7 @@ on:
 
 jobs:
   build:
+    name: Build Android ARM64 TTS CLI
     runs-on: ubuntu-24.04
 
     steps:
@@ -12,131 +13,176 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: k2-fsa/sherpa-onnx
+          ref: v1.13.7
           fetch-depth: 1
+
+      - name: Show Sherpa version
+        shell: bash
+        run: |
+          echo "Sherpa ONNX source:"
+          git describe --tags --always || true
+          git rev-parse HEAD
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
       - name: Install Android NDK
+        shell: bash
         run: |
-          sdkmanager "ndk;27.2.12479018"
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "ndk;22.1.7171670"
 
-          export ANDROID_NDK="$ANDROID_HOME/ndk/27.2.12479018"
+          test -d "$ANDROID_HOME/ndk/22.1.7171670"
 
           echo "ANDROID_HOME=$ANDROID_HOME"
-          echo "ANDROID_NDK=$ANDROID_NDK"
+          echo "NDK=$ANDROID_HOME/ndk/22.1.7171670"
 
-          test -d "$ANDROID_NDK"
-
-      - name: Build Sherpa ONNX Android ARM64 TTS CLI
+      - name: Build Sherpa ONNX ARM64 TTS CLI
+        shell: bash
         run: |
-          set -e
+          set -euo pipefail
 
-          export ANDROID_NDK="$ANDROID_HOME/ndk/27.2.12479018"
+          export ANDROID_NDK="$ANDROID_HOME/ndk/22.1.7171670"
 
-          # Android 8.1 compatible baseline.
-          # NNAPI is not needed for this CPU TTS test.
+          # Your phone is Android 8.1 / API 27.
+          # API 21 is Sherpa's normal Android baseline and is compatible
+          # with Android 8.1.
           export SHERPA_ONNX_ANDROID_PLATFORM=android-21
 
+          # Use an Android ONNX Runtime release that avoids the
+          # 1.28.2 linker problem seen in the failed build.
+          export SHERPA_ONNX_ONNXRUNTIME_VERSION=1.27.1
+
+          # Only functionality needed for this experiment.
           export SHERPA_ONNX_ENABLE_TTS=ON
           export SHERPA_ONNX_ENABLE_BINARY=ON
 
           export SHERPA_ONNX_ENABLE_JNI=OFF
+          export SHERPA_ONNX_ENABLE_C_API=OFF
           export SHERPA_ONNX_ENABLE_PYTHON=OFF
           export SHERPA_ONNX_ENABLE_TESTS=OFF
           export SHERPA_ONNX_ENABLE_CHECK=OFF
           export SHERPA_ONNX_ENABLE_PORTAUDIO=OFF
           export SHERPA_ONNX_ENABLE_SPEAKER_DIARIZATION=OFF
-          export SHERPA_ONNX_ENABLE_C_API=OFF
+          export SHERPA_ONNX_ENABLE_RKNN=OFF
+          export SHERPA_ONNX_ENABLE_QNN=OFF
 
-          # Use the normal shared ONNX Runtime build.
-          export BUILD_SHARED_LIBS=ON
+          # The Android ONNX Runtime shared library contains references
+          # to Android libc symbols that newer lld rejects when linking
+          # an executable. Allow the Android loader to resolve them at
+          # runtime.
+          export CMAKE_EXE_LINKER_FLAGS="-Wl,--allow-shlib-undefined"
+          export CMAKE_SHARED_LINKER_FLAGS="-Wl,--allow-shlib-undefined"
 
-          echo "========================================"
+          echo "=============================================="
+          echo "Sherpa ONNX"
+          echo "=============================================="
           echo "ANDROID_NDK=$ANDROID_NDK"
-          echo "SHERPA_ONNX_ANDROID_PLATFORM=$SHERPA_ONNX_ANDROID_PLATFORM"
-          echo "SHERPA_ONNX_ENABLE_TTS=$SHERPA_ONNX_ENABLE_TTS"
-          echo "SHERPA_ONNX_ENABLE_BINARY=$SHERPA_ONNX_ENABLE_BINARY"
-          echo "SHERPA_ONNX_ENABLE_JNI=$SHERPA_ONNX_ENABLE_JNI"
-          echo "SHERPA_ONNX_ENABLE_C_API=$SHERPA_ONNX_ENABLE_C_API"
-          echo "BUILD_SHARED_LIBS=$BUILD_SHARED_LIBS"
-          echo "========================================"
+          echo "ANDROID_PLATFORM=$SHERPA_ONNX_ANDROID_PLATFORM"
+          echo "ONNX Runtime=$SHERPA_ONNX_ONNXRUNTIME_VERSION"
+          echo "TTS=$SHERPA_ONNX_ENABLE_TTS"
+          echo "Binary=$SHERPA_ONNX_ENABLE_BINARY"
+          echo "JNI=$SHERPA_ONNX_ENABLE_JNI"
+          echo "C API=$SHERPA_ONNX_ENABLE_C_API"
+          echo "RKNN=$SHERPA_ONNX_ENABLE_RKNN"
+          echo "QNN=$SHERPA_ONNX_ENABLE_QNN"
+          echo "=============================================="
 
           chmod +x build-android-arm64-v8a.sh
 
           ./build-android-arm64-v8a.sh
 
-      - name: Verify build
+      - name: Verify build output
+        shell: bash
         run: |
-          set -e
+          set -euo pipefail
 
-          echo "========================================"
+          INSTALL="build-android-arm64-v8a/install"
+
+          echo "=============================================="
           echo "Installed files"
-          echo "========================================"
+          echo "=============================================="
 
-          find build-android-arm64-v8a/install \
-            -maxdepth 3 \
+          find "$INSTALL" \
             -type f \
             -exec ls -lh {} \;
 
           echo
-          echo "========================================"
+          echo "=============================================="
           echo "TTS executable"
-          echo "========================================"
+          echo "=============================================="
 
-          test -f \
-            build-android-arm64-v8a/install/bin/sherpa-onnx-offline-tts
+          test -f "$INSTALL/bin/sherpa-onnx-offline-tts"
 
-          file \
-            build-android-arm64-v8a/install/bin/sherpa-onnx-offline-tts
+          file "$INSTALL/bin/sherpa-onnx-offline-tts"
 
           echo
-          echo "========================================"
+          echo "=============================================="
           echo "Runtime libraries"
-          echo "========================================"
+          echo "=============================================="
 
-          ls -lh build-android-arm64-v8a/install/lib/
+          find "$INSTALL/lib" \
+            -maxdepth 1 \
+            -type f \
+            -name "*.so" \
+            -exec ls -lh {} \;
 
-      - name: Package TTS CLI and libraries
+          echo
+          echo "=============================================="
+          echo "Executable dependencies"
+          echo "=============================================="
+
+          readelf -d "$INSTALL/bin/sherpa-onnx-offline-tts" || true
+
+      - name: Prepare Android ARM64 package
+        shell: bash
         run: |
-          set -e
+          set -euo pipefail
 
-          mkdir -p package
+          INSTALL="build-android-arm64-v8a/install"
 
-          cp \
-            build-android-arm64-v8a/install/bin/sherpa-onnx-offline-tts \
-            package/
+          rm -rf package
+          mkdir -p package/lib
 
-          cp \
-            build-android-arm64-v8a/install/lib/libsherpa-onnx-core.so \
-            package/ \
-            2>/dev/null || true
-
-          cp \
-            build-android-arm64-v8a/install/lib/libonnxruntime.so \
-            package/
+          # Copy the executable.
+          cp "$INSTALL/bin/sherpa-onnx-offline-tts" \
+             package/
 
           chmod +x package/sherpa-onnx-offline-tts
 
-          echo "========================================"
-          echo "Package"
-          echo "========================================"
+          # Copy every required shared library produced by Sherpa.
+          find "$INSTALL/lib" \
+            -maxdepth 1 \
+            -type f \
+            -name "*.so" \
+            -exec cp {} package/lib/ \;
 
-          ls -lh package/
+          echo "=============================================="
+          echo "Final package"
+          echo "=============================================="
 
-          file package/*
-
-          tar \
-            -cjf \
-            sherpa-tts-android-arm64.tar.bz2 \
-            -C package \
-            .
+          find package \
+            -type f \
+            -exec ls -lh {} \;
 
           echo
-          echo "Archive:"
+          echo "=============================================="
+          echo "Executable architecture"
+          echo "=============================================="
+
+          file package/sherpa-onnx-offline-tts
+
+          echo
+          echo "=============================================="
+          echo "Creating archive"
+          echo "=============================================="
+
+          tar -cjf sherpa-tts-android-arm64.tar.bz2 \
+            -C package .
+
           ls -lh sherpa-tts-android-arm64.tar.bz2
 
-      - name: Upload TTS CLI artifact
+      - name: Upload Android ARM64 TTS package
         uses: actions/upload-artifact@v4
         with:
           name: sherpa-tts-android-arm64
