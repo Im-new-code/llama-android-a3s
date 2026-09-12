@@ -1,14 +1,14 @@
-name: JARVIS TTS Android
+name: Build JARVIS Android
 
 on:
   workflow_dispatch:
 
 jobs:
   build:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-22.04
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Set up Java 17
@@ -17,543 +17,74 @@ jobs:
           distribution: temurin
           java-version: "17"
 
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
       - name: Install Android SDK components
         run: |
-          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager \
+            "platform-tools" \
             "platforms;android-35" \
             "build-tools;35.0.0"
 
-      - name: Download Gradle 8.7
+      - name: Extract JARVIS source
         run: |
-          wget -q https://services.gradle.org/distributions/gradle-8.7-bin.zip
-          unzip -q gradle-8.7-bin.zip
-
-      - name: Create Android project
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          rm -rf app settings.gradle build.gradle gradle.properties
-
-          mkdir -p app/src/main/java/com/imnewcode/jarvis
-          mkdir -p app/src/main/res/values
-          mkdir -p app/libs
-
-          cat > settings.gradle <<'EOF'
-          pluginManagement {
-              repositories {
-                  google()
-                  mavenCentral()
-                  gradlePluginPortal()
-              }
-          }
-
-          dependencyResolutionManagement {
-              repositories {
-                  google()
-                  mavenCentral()
-              }
-          }
-
-          rootProject.name = "JARVIS"
-          include(":app")
-          EOF
-
-          cat > build.gradle <<'EOF'
-          plugins {
-              id 'com.android.application' version '8.6.1' apply false
-          }
-          EOF
-
-          cat > gradle.properties <<'EOF'
-          org.gradle.jvmargs=-Xmx1536m -Dfile.encoding=UTF-8
-          android.nonTransitiveRClass=true
-          EOF
-
-          cat > app/build.gradle <<'EOF'
-          plugins {
-              id 'com.android.application'
-          }
-
-          android {
-              namespace 'com.imnewcode.jarvis'
-              compileSdk 35
-
-              defaultConfig {
-                  applicationId 'com.imnewcode.jarvis'
-                  minSdk 27
-                  targetSdk 35
-                  versionCode 1
-                  versionName '0.1.0'
-
-                  ndk {
-                      abiFilters 'arm64-v8a'
-                  }
-              }
-
-              buildTypes {
-                  release {
-                      minifyEnabled false
-                      shrinkResources false
-                  }
-              }
-
-              compileOptions {
-                  sourceCompatibility JavaVersion.VERSION_17
-                  targetCompatibility JavaVersion.VERSION_17
-              }
-
-              packaging {
-                  jniLibs {
-                      useLegacyPackaging = true
-                  }
-              }
-          }
-
-          dependencies {
-              implementation files('libs/sherpa-onnx-1.13.8.aar')
-              implementation 'org.jetbrains.kotlin:kotlin-stdlib:1.9.24'
-          }
-          EOF
-
-          cat > app/src/main/AndroidManifest.xml <<'EOF'
-          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-
-              <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
-
-              <application
-                  android:allowBackup="false"
-                  android:label="JARVIS"
-                  android:theme="@style/AppTheme"
-                  android:usesCleartextTraffic="false">
-
-                  <activity
-                      android:name=".MainActivity"
-                      android:screenOrientation="portrait"
-                      android:exported="true">
-
-                      <intent-filter>
-                          <action android:name="android.intent.action.MAIN" />
-                          <category android:name="android.intent.category.LAUNCHER" />
-                      </intent-filter>
-
-                  </activity>
-              </application>
-          </manifest>
-          EOF
-
-          cat > app/src/main/res/values/styles.xml <<'EOF'
-          <resources>
-              <style name="AppTheme" parent="android:style/Theme.Material.Light.NoActionBar">
-                  <item name="android:fontFamily">sans</item>
-                  <item name="android:colorAccent">#444444</item>
-                  <item name="android:navigationBarColor">#000000</item>
-                  <item name="android:windowLightStatusBar">false</item>
-                  <item name="android:statusBarColor">#000000</item>
-              </style>
-          </resources>
-          EOF
-
-          cat > app/src/main/java/com/imnewcode/jarvis/MainActivity.java <<'EOF'
-          package com.imnewcode.jarvis;
-
-          import android.Manifest;
-          import android.app.Activity;
-          import android.content.pm.PackageManager;
-          import android.media.AudioFormat;
-          import android.media.AudioManager;
-          import android.media.AudioTrack;
-          import android.os.Bundle;
-          import android.os.Handler;
-          import android.os.Looper;
-          import android.view.Gravity;
-          import android.widget.Button;
-          import android.widget.EditText;
-          import android.widget.LinearLayout;
-          import android.widget.TextView;
-          import android.widget.Toast;
-
-          import com.k2fsa.sherpa.onnx.GeneratedAudio;
-          import com.k2fsa.sherpa.onnx.OfflineTts;
-          import com.k2fsa.sherpa.onnx.OfflineTtsConfig;
-          import com.k2fsa.sherpa.onnx.OfflineTtsModelConfig;
-          import com.k2fsa.sherpa.onnx.OfflineTtsVitsModelConfig;
-
-          import java.io.File;
-
-          public class MainActivity extends Activity {
-
-              private static final int STORAGE_PERMISSION = 1001;
-
-              private static final String MODEL_DIR =
-                      "/storage/emulated/0/AI-Models/vits-piper-en_US-hfc_male-medium";
-
-              private static final String MODEL_NAME =
-                      "en_US-hfc_male-medium.onnx";
-
-              private OfflineTts tts;
-              private AudioTrack audioTrack;
-
-              private final Handler mainHandler =
-                      new Handler(Looper.getMainLooper());
-
-              private TextView status;
-              private EditText input;
-
-              @Override
-              protected void onCreate(Bundle savedInstanceState) {
-                  super.onCreate(savedInstanceState);
-
-                  buildUi();
-
-                  if (android.os.Build.VERSION.SDK_INT >= 23 &&
-                          checkSelfPermission(
-                                  Manifest.permission.READ_EXTERNAL_STORAGE)
-                                  != PackageManager.PERMISSION_GRANTED) {
-
-                      requestPermissions(
-                              new String[]{
-                                      Manifest.permission.READ_EXTERNAL_STORAGE
-                              },
-                              STORAGE_PERMISSION);
-                  }
-              }
-
-              private void buildUi() {
-                  LinearLayout root = new LinearLayout(this);
-                  root.setOrientation(LinearLayout.VERTICAL);
-                  root.setPadding(32, 40, 32, 32);
-                  root.setGravity(Gravity.CENTER_HORIZONTAL);
-
-                  TextView title = new TextView(this);
-                  title.setText("JARVIS TTS");
-                  title.setTextSize(28);
-                  title.setGravity(Gravity.CENTER);
-
-                  root.addView(title,
-                          new LinearLayout.LayoutParams(
-                                  -1,
-                                  LinearLayout.LayoutParams.WRAP_CONTENT));
-
-                  status = new TextView(this);
-                  status.setText(
-                          "Sherpa ONNX\n" +
-                          "HFC Male Medium\n" +
-                          "Checking model...");
-                  status.setTextSize(16);
-                  status.setPadding(0, 24, 0, 24);
-
-                  root.addView(status,
-                          new LinearLayout.LayoutParams(
-                                  -1,
-                                  LinearLayout.LayoutParams.WRAP_CONTENT));
-
-                  input = new EditText(this);
-                  input.setText(
-                          "Hello. I am Jarvis. " +
-                          "Your local offline assistant is ready.");
-                  input.setTextSize(18);
-                  input.setGravity(Gravity.TOP);
-                  input.setMinLines(4);
-
-                  root.addView(input,
-                          new LinearLayout.LayoutParams(
-                                  -1,
-                                  0,
-                                  1));
-
-                  Button speak = new Button(this);
-                  speak.setText("SPEAK");
-
-                  speak.setOnClickListener(v ->
-                          speakText(input.getText().toString()));
-
-                  root.addView(speak,
-                          new LinearLayout.LayoutParams(
-                                  -1,
-                                  LinearLayout.LayoutParams.WRAP_CONTENT));
-
-                  Button stop = new Button(this);
-                  stop.setText("STOP");
-
-                  stop.setOnClickListener(v -> stopPlayback());
-
-                  root.addView(stop,
-                          new LinearLayout.LayoutParams(
-                                  -1,
-                                  LinearLayout.LayoutParams.WRAP_CONTENT));
-
-                  setContentView(root);
-              }
-
-              private void speakText(String text) {
-                  if (text == null || text.trim().isEmpty()) {
-                      return;
-                  }
-
-                  File modelDir = new File(MODEL_DIR);
-                  File modelFile = new File(modelDir, MODEL_NAME);
-                  File tokensFile = new File(modelDir, "tokens.txt");
-                  File dataDir = new File(modelDir, "espeak-ng-data");
-
-                  if (!modelFile.isFile() ||
-                          !tokensFile.isFile() ||
-                          !dataDir.isDirectory()) {
-
-                      status.setText(
-                              "HFC Male model not found.\n\n" +
-                              "Expected:\n" +
-                              MODEL_DIR);
-
-                      Toast.makeText(
-                              this,
-                              "HFC Male model not found",
-                              Toast.LENGTH_LONG).show();
-
-                      return;
-                  }
-
-                  status.setText("Generating speech...");
-
-                  new Thread(() -> {
-                      try {
-                          createTtsIfNeeded();
-
-                          GeneratedAudio audio =
-                                  tts.generate(text, 0, 1.0f);
-
-                          playAudio(
-                                  audio.getSamples(),
-                                  audio.getSampleRate());
-
-                      } catch (Throwable e) {
-                          e.printStackTrace();
-
-                          mainHandler.post(() ->
-                                  status.setText(
-                                          "TTS error:\n" +
-                                          e.getClass().getSimpleName() +
-                                          "\n" +
-                                          String.valueOf(e.getMessage())));
-                      }
-                  }, "JARVIS-TTS").start();
-              }
-
-              private synchronized void createTtsIfNeeded() {
-                  if (tts != null) {
-                      return;
-                  }
-
-                  OfflineTtsVitsModelConfig vits =
-                          new OfflineTtsVitsModelConfig();
-
-                  vits.setModel(
-                          MODEL_DIR + "/" + MODEL_NAME);
-
-                  vits.setTokens(
-                          MODEL_DIR + "/tokens.txt");
-
-                  vits.setDataDir(
-                          MODEL_DIR + "/espeak-ng-data");
-
-                  vits.setLengthScale(0.90f);
-                  vits.setNoiseScale(0.667f);
-                  vits.setNoiseScaleW(0.80f);
-
-                  OfflineTtsModelConfig model =
-                          new OfflineTtsModelConfig();
-
-                  model.setVits(vits);
-                  model.setNumThreads(4);
-                  model.setProvider("cpu");
-
-                  OfflineTtsConfig config =
-                          new OfflineTtsConfig();
-
-                  config.setModel(model);
-                  config.setMaxNumSentences(1);
-
-                  tts = new OfflineTts(null, config);
-              }
-
-              private void playAudio(
-                      float[] samples,
-                      int sampleRate) {
-
-                  stopPlayback();
-
-                  short[] pcm = new short[samples.length];
-
-                  for (int i = 0; i < samples.length; i++) {
-                      float value = samples[i];
-
-                      if (value > 1.0f) {
-                          value = 1.0f;
-                      } else if (value < -1.0f) {
-                          value = -1.0f;
-                      }
-
-                      pcm[i] = (short) (value * 32767.0f);
-                  }
-
-                  int minBuffer =
-                          AudioTrack.getMinBufferSize(
-                                  sampleRate,
-                                  AudioFormat.CHANNEL_OUT_MONO,
-                                  AudioFormat.ENCODING_PCM_16BIT);
-
-                  if (minBuffer <= 0) {
-                      throw new IllegalStateException(
-                              "AudioTrack buffer size unavailable");
-                  }
-
-                  AudioTrack track = new AudioTrack(
-                          AudioManager.STREAM_MUSIC,
-                          sampleRate,
-                          AudioFormat.CHANNEL_OUT_MONO,
-                          AudioFormat.ENCODING_PCM_16BIT,
-                          Math.max(minBuffer, sampleRate),
-                          AudioTrack.MODE_STREAM);
-
-                  synchronized (this) {
-                      audioTrack = track;
-                  }
-
-                  try {
-                      track.play();
-
-                      int offset = 0;
-
-                      while (offset < pcm.length) {
-                          synchronized (this) {
-                              if (audioTrack != track) {
-                                  return;
-                              }
-                          }
-
-                          int written = track.write(
-                                  pcm,
-                                  offset,
-                                  pcm.length - offset);
-
-                          if (written < 0) {
-                              throw new IllegalStateException(
-                                      "AudioTrack write failed: " +
-                                      written);
-                          }
-
-                          if (written == 0) {
-                              continue;
-                          }
-
-                          offset += written;
-                      }
-
-                      track.stop();
-
-                      mainHandler.post(() ->
-                              status.setText("Ready."));
-
-                  } finally {
-                      synchronized (this) {
-                          if (audioTrack == track) {
-                              audioTrack = null;
-                          }
-                      }
-
-                      try {
-                          track.release();
-                      } catch (Throwable ignored) {
-                      }
-                  }
-              }
-
-              private synchronized void stopPlayback() {
-                  if (audioTrack == null) {
-                      return;
-                  }
-
-                  AudioTrack track = audioTrack;
-                  audioTrack = null;
-
-                  try {
-                      track.pause();
-                  } catch (Throwable ignored) {
-                  }
-
-                  try {
-                      track.flush();
-                  } catch (Throwable ignored) {
-                  }
-
-                  try {
-                      track.release();
-                  } catch (Throwable ignored) {
-                  }
-              }
-
-              @Override
-              protected void onDestroy() {
-                  stopPlayback();
-
-                  if (tts != null) {
-                      try {
-                          tts.release();
-                      } catch (Throwable ignored) {
-                      }
-
-                      tts = null;
-                  }
-
-                  super.onDestroy();
-              }
-          }
-          EOF
-
-      - name: Download Sherpa ONNX Android AAR
+          rm -rf jarvis-src
+          mkdir -p jarvis-src
+          unzip -q jarvis-source.zip -d jarvis-src
+
+          echo "JARVIS source:"
+          find jarvis-src -maxdepth 4 -type f | sort
+
+      - name: Download Sherpa ONNX AAR
+        working-directory: jarvis-src
         run: |
           wget -q \
-            https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.8/sherpa-onnx-1.13.8.aar \
-            -O app/libs/sherpa-onnx-1.13.8.aar
+            "https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.8/sherpa-onnx-1.13.8.aar" \
+            -O app/sherpa-onnx.aar
 
-          test -s app/libs/sherpa-onnx-1.13.8.aar
+          echo "Sherpa AAR:"
+          ls -lh app/sherpa-onnx.aar
 
-          echo "Sherpa ONNX AAR:"
-          ls -lh app/libs/sherpa-onnx-1.13.8.aar
-
-          echo "SHA256:"
-          sha256sum app/libs/sherpa-onnx-1.13.8.aar
-
-      - name: Build APK
+      - name: Install Gradle
         run: |
-          ./gradle-8.7/bin/gradle \
-            --no-daemon \
-            --stacktrace \
-            assembleRelease
+          wget -q \
+            "https://services.gradle.org/distributions/gradle-8.7-bin.zip" \
+            -O /tmp/gradle.zip
 
-      - name: Verify APK
+          unzip -q /tmp/gradle.zip -d /tmp
+          echo "/tmp/gradle-8.7/bin" >> "$GITHUB_PATH"
+
+      - name: Generate Gradle wrapper
+        working-directory: jarvis-src
         run: |
-          APK="app/build/outputs/apk/release/app-release.apk"
+          gradle wrapper --gradle-version 8.7
 
-          test -f "$APK"
+      - name: Verify project structure
+        working-directory: jarvis-src
+        run: |
+          test -f settings.gradle
+          test -f build.gradle
+          test -f gradle.properties
+          test -f app/build.gradle
+          test -f app/src/main/AndroidManifest.xml
 
-          "$ANDROID_HOME/build-tools/35.0.0/zipalign" \
-            -c \
-            -P 16 \
-            -v \
-            4 \
-            "$APK"
+          echo "Project structure verified."
 
-          "$ANDROID_HOME/build-tools/35.0.0/apksigner" \
-            verify \
-            --verbose \
-            "$APK"
+      - name: Build debug APK
+        working-directory: jarvis-src
+        run: |
+          ./gradlew --no-daemon --stacktrace assembleDebug
 
-          ls -lh "$APK"
+      - name: Show APK
+        working-directory: jarvis-src
+        run: |
+          find app/build/outputs/apk -type f -name "*.apk" -exec ls -lh {} \;
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: JARVIS-TTS-arm64
-          path: app/build/outputs/apk/release/app-release.apk
+          name: JARVIS-debug-apk
+          path: jarvis-src/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
