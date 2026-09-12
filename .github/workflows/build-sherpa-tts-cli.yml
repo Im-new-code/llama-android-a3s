@@ -30,9 +30,13 @@ jobs:
 
       - name: Build Sherpa ONNX Android ARM64 TTS CLI
         run: |
+          set -e
+
           export ANDROID_NDK="$ANDROID_HOME/ndk/27.2.12479018"
 
-          export SHERPA_ONNX_ANDROID_PLATFORM=android-27
+          # Android 8.1 compatible baseline.
+          # NNAPI is not needed for this CPU TTS test.
+          export SHERPA_ONNX_ANDROID_PLATFORM=android-21
 
           export SHERPA_ONNX_ENABLE_TTS=ON
           export SHERPA_ONNX_ENABLE_BINARY=ON
@@ -45,42 +49,29 @@ jobs:
           export SHERPA_ONNX_ENABLE_SPEAKER_DIARIZATION=OFF
           export SHERPA_ONNX_ENABLE_C_API=OFF
 
-          export BUILD_SHARED_LIBS=OFF
+          # Use the normal shared ONNX Runtime build.
+          export BUILD_SHARED_LIBS=ON
 
           echo "========================================"
-          echo "Android NDK: $ANDROID_NDK"
-          echo "Android Platform: $SHERPA_ONNX_ANDROID_PLATFORM"
-          echo "TTS: $SHERPA_ONNX_ENABLE_TTS"
-          echo "Binary: $SHERPA_ONNX_ENABLE_BINARY"
-          echo "JNI: $SHERPA_ONNX_ENABLE_JNI"
-          echo "Shared Libraries: $BUILD_SHARED_LIBS"
+          echo "ANDROID_NDK=$ANDROID_NDK"
+          echo "SHERPA_ONNX_ANDROID_PLATFORM=$SHERPA_ONNX_ANDROID_PLATFORM"
+          echo "SHERPA_ONNX_ENABLE_TTS=$SHERPA_ONNX_ENABLE_TTS"
+          echo "SHERPA_ONNX_ENABLE_BINARY=$SHERPA_ONNX_ENABLE_BINARY"
+          echo "SHERPA_ONNX_ENABLE_JNI=$SHERPA_ONNX_ENABLE_JNI"
+          echo "SHERPA_ONNX_ENABLE_C_API=$SHERPA_ONNX_ENABLE_C_API"
+          echo "BUILD_SHARED_LIBS=$BUILD_SHARED_LIBS"
           echo "========================================"
 
           chmod +x build-android-arm64-v8a.sh
 
           ./build-android-arm64-v8a.sh
 
-      - name: Verify TTS executable
+      - name: Verify build
         run: |
-          echo "========================================"
-          echo "Searching for Sherpa TTS executable"
-          echo "========================================"
+          set -e
 
-          find build-android-arm64-v8a/install \
-            -type f \
-            -name "sherpa-onnx-offline-tts" \
-            -exec ls -lh {} \;
-
-          echo
           echo "========================================"
-          echo "Executable information"
-          echo "========================================"
-
-          file build-android-arm64-v8a/install/bin/sherpa-onnx-offline-tts
-
-          echo
-          echo "========================================"
-          echo "Install tree"
+          echo "Installed files"
           echo "========================================"
 
           find build-android-arm64-v8a/install \
@@ -88,7 +79,25 @@ jobs:
             -type f \
             -exec ls -lh {} \;
 
-      - name: Package TTS CLI
+          echo
+          echo "========================================"
+          echo "TTS executable"
+          echo "========================================"
+
+          test -f \
+            build-android-arm64-v8a/install/bin/sherpa-onnx-offline-tts
+
+          file \
+            build-android-arm64-v8a/install/bin/sherpa-onnx-offline-tts
+
+          echo
+          echo "========================================"
+          echo "Runtime libraries"
+          echo "========================================"
+
+          ls -lh build-android-arm64-v8a/install/lib/
+
+      - name: Package TTS CLI and libraries
         run: |
           set -e
 
@@ -98,19 +107,24 @@ jobs:
             build-android-arm64-v8a/install/bin/sherpa-onnx-offline-tts \
             package/
 
+          cp \
+            build-android-arm64-v8a/install/lib/libsherpa-onnx-core.so \
+            package/ \
+            2>/dev/null || true
+
+          cp \
+            build-android-arm64-v8a/install/lib/libonnxruntime.so \
+            package/
+
           chmod +x package/sherpa-onnx-offline-tts
 
           echo "========================================"
-          echo "Final package contents"
+          echo "Package"
           echo "========================================"
 
-          file package/sherpa-onnx-offline-tts
           ls -lh package/
 
-          echo
-          echo "========================================"
-          echo "Creating archive"
-          echo "========================================"
+          file package/*
 
           tar \
             -cjf \
@@ -118,6 +132,8 @@ jobs:
             -C package \
             .
 
+          echo
+          echo "Archive:"
           ls -lh sherpa-tts-android-arm64.tar.bz2
 
       - name: Upload TTS CLI artifact
