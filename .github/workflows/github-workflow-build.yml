@@ -1,0 +1,88 @@
+name: Build JARVIS Android
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK components
+        run: |
+          sdkmanager "platforms;android-35" \
+                     "build-tools;35.0.0" \
+                     "platform-tools" \
+                     "ndk;27.2.12479018"
+
+      - name: Download source snapshot
+        env:
+          SOURCE_URL: https://raw.githubusercontent.com/Im-new-code/llama-android-a3s/main/jarvis-source.zip
+        run: |
+          rm -rf jarvis-src
+          mkdir -p jarvis-src
+          wget -q "$SOURCE_URL" -O jarvis-source.zip
+          unzip -q jarvis-source.zip -d jarvis-src
+
+      - name: Download Sherpa ONNX Android runtime
+        run: |
+          mkdir -p jarvis-src/app/libs
+          wget -q https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.8/sherpa-onnx-1.13.8.aar \
+            -O jarvis-src/app/libs/sherpa-onnx-1.13.8.aar
+          echo "633c24321e06b1fe79feafa03ea16cbc0f8a286641e2da3559bac91bdb13bd96  jarvis-src/app/libs/sherpa-onnx-1.13.8.aar" | sha256sum -c -
+
+      - name: Build Android llama-cli for JARVIS
+        run: |
+          rm -rf llama.cpp
+          git clone --depth 1 https://github.com/ggml-org/llama.cpp.git
+          cd llama.cpp
+          git fetch --depth 1 origin b78db3b
+          git checkout b78db3b
+          export ANDROID_NDK="$ANDROID_HOME/ndk/27.2.12479018"
+          cmake \
+            -S . \
+            -B build-android \
+            -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-27 \
+            -DGGML_NATIVE=OFF \
+            -DGGML_OPENMP=OFF \
+            -DGGML_LLAMAFILE=OFF \
+            -DLLAMA_OPENSSL=OFF \
+            -DLLAMA_BUILD_SERVER=OFF \
+            -DLLAMA_BUILD_TESTS=OFF \
+            -DLLAMA_BUILD_EXAMPLES=ON \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-android --config Release --target llama-cli -j2
+          test -x build-android/bin/llama-cli
+          mkdir -p "$GITHUB_WORKSPACE/jarvis-src/app/src/main/assets"
+          cp build-android/bin/llama-cli "$GITHUB_WORKSPACE/jarvis-src/app/src/main/assets/llama-cli"
+          chmod 644 "$GITHUB_WORKSPACE/jarvis-src/app/src/main/assets/llama-cli"
+          file "$GITHUB_WORKSPACE/jarvis-src/app/src/main/assets/llama-cli"
+
+      - name: Create Gradle wrapper
+        working-directory: jarvis-src
+        run: |
+          gradle wrapper --gradle-version 8.7
+
+      - name: Build debug APK
+        working-directory: jarvis-src
+        run: ./gradlew --no-daemon assembleDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: JARVIS-debug-apk
+          path: jarvis-src/app/build/outputs/apk/debug/app-debug.apk
