@@ -16,11 +16,10 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Java 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
-          cache: gradle
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
@@ -34,12 +33,15 @@ jobs:
 
       - name: Verify source archive
         run: |
-          test -f jarvis-source.zip || {
-            echo "ERROR: jarvis-source.zip was not found in repository root."
+          if [ ! -f "jarvis-source.zip" ]; then
+            echo "ERROR: jarvis-source.zip was not found in the repository root."
+            echo
+            echo "Repository contents:"
+            find . -maxdepth 3 -type f | sort
             exit 1
-          }
+          fi
 
-          echo "Source archive:"
+          echo "Source archive found:"
           ls -lh jarvis-source.zip
 
           echo
@@ -53,10 +55,10 @@ jobs:
 
           unzip -q jarvis-source.zip -d jarvis-src
 
-          echo "Extracted project:"
-          find jarvis-src -maxdepth 3 -type f | sort
+          echo "Extracted source:"
+          find jarvis-src -maxdepth 4 -type f | sort
 
-      - name: Verify project structure
+      - name: Verify JARVIS project structure
         run: |
           required_files=(
             "jarvis-src/settings.gradle"
@@ -69,17 +71,18 @@ jobs:
           for file in "${required_files[@]}"; do
             if [ ! -f "$file" ]; then
               echo
-              echo "ERROR: Missing required file:"
+              echo "ERROR: Required file is missing:"
               echo "$file"
               echo
-              echo "Your ZIP must contain the Android project directly at its root."
-              echo "Correct:"
+              echo "The ZIP must contain the project directly at its root."
+              echo
+              echo "Expected:"
               echo "  settings.gradle"
               echo "  build.gradle"
               echo "  gradle.properties"
               echo "  app/"
               echo
-              echo "Incorrect:"
+              echo "Not:"
               echo "  jarvis-source/settings.gradle"
               echo "  jarvis-source/app/"
               exit 1
@@ -87,19 +90,23 @@ jobs:
           done
 
           echo
-          echo "JARVIS project structure verified successfully."
+          echo "JARVIS project structure verified."
 
-      - name: Download Sherpa ONNX
+      - name: Download Sherpa ONNX AAR
         run: |
           SHERPA_VERSION="1.13.8"
+
           SHERPA_URL="https://github.com/k2-fsa/sherpa-onnx/releases/download/v${SHERPA_VERSION}/sherpa-onnx-${SHERPA_VERSION}.aar"
 
-          wget -q \
+          wget \
             --show-progress \
             "$SHERPA_URL" \
             -O "jarvis-src/app/sherpa-onnx.aar"
 
-          test -s "jarvis-src/app/sherpa-onnx.aar"
+          if [ ! -s "jarvis-src/app/sherpa-onnx.aar" ]; then
+            echo "ERROR: Sherpa ONNX AAR download failed."
+            exit 1
+          fi
 
           echo
           echo "Sherpa ONNX AAR:"
@@ -109,7 +116,7 @@ jobs:
         run: |
           GRADLE_VERSION="8.7"
 
-          wget -q \
+          wget \
             --show-progress \
             "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip" \
             -O /tmp/gradle.zip
@@ -122,7 +129,10 @@ jobs:
         working-directory: jarvis-src
         run: |
           gradle --version
-          gradle wrapper --gradle-version 8.7 --distribution-type bin
+
+          gradle wrapper \
+            --gradle-version 8.7 \
+            --distribution-type bin
 
       - name: Build JARVIS debug APK
         working-directory: jarvis-src
@@ -133,21 +143,26 @@ jobs:
             --warning-mode all \
             assembleDebug
 
-      - name: Verify APK exists
+      - name: Verify APK
         run: |
           APK="jarvis-src/app/build/outputs/apk/debug/app-debug.apk"
 
-          test -f "$APK" || {
+          if [ ! -f "$APK" ]; then
             echo "ERROR: APK was not produced."
-            find jarvis-src/app/build/outputs -type f 2>/dev/null || true
-            exit 1
-          }
 
-          echo "APK successfully produced:"
+            echo
+            echo "Available build outputs:"
+            find jarvis-src/app/build/outputs \
+              -type f 2>/dev/null | sort || true
+
+            exit 1
+          fi
+
+          echo "JARVIS APK successfully built:"
           ls -lh "$APK"
 
           echo
-          echo "APK information:"
+          echo "APK file information:"
           file "$APK"
 
       - name: Upload JARVIS APK
