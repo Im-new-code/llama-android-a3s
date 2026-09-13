@@ -1,4 +1,4 @@
-name: Build JARVIS Android
+name: Build AI Companion Prototype
 
 on:
   workflow_dispatch:
@@ -25,64 +25,79 @@ jobs:
           sdkmanager "platforms;android-35" \
                      "build-tools;35.0.0" \
                      "platform-tools" \
+                     "cmake;3.22.1" \
                      "ndk;27.2.12479018"
 
-      - name: Download source snapshot
+      - name: Download prototype source
         env:
           SOURCE_URL: https://raw.githubusercontent.com/Im-new-code/llama-android-a3s/main/jarvis-source.zip
         run: |
-          rm -rf jarvis-src
-          mkdir -p jarvis-src
-          wget -q "$SOURCE_URL" -O jarvis-source.zip
-          unzip -q jarvis-source.zip -d jarvis-src
+          rm -rf companion-src
+          mkdir -p companion-src
 
-      - name: Download Sherpa ONNX Android runtime
-        run: |
-          mkdir -p jarvis-src/app/libs
-          wget -q https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.8/sherpa-onnx-1.13.8.aar \
-            -O jarvis-src/app/libs/sherpa-onnx-1.13.8.aar
-          echo "633c24321e06b1fe79feafa03ea16cbc0f8a286641e2da3559bac91bdb13bd96  jarvis-src/app/libs/sherpa-onnx-1.13.8.aar" | sha256sum -c -
+          wget -q "$SOURCE_URL" -O source.zip
 
-      - name: Build Android llama-cli for JARVIS
+          unzip -q source.zip -d companion-src
+
+          echo "=== Prototype source ==="
+          find companion-src -maxdepth 3 -type f | sort
+
+      - name: Verify prototype source
+        working-directory: companion-src
         run: |
-          rm -rf llama.cpp
-          git clone https://github.com/ggml-org/llama.cpp.git
-          cd llama.cpp
-          git checkout b78db3b
-          export ANDROID_NDK="$ANDROID_HOME/ndk/27.2.12479018"
-          cmake \
-            -S . \
-            -B build-android \
-            -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK/build/cmake/android.toolchain.cmake" \
-            -DANDROID_ABI=arm64-v8a \
-            -DANDROID_PLATFORM=android-27 \
-            -DGGML_NATIVE=OFF \
-            -DGGML_OPENMP=OFF \
-            -DGGML_LLAMAFILE=OFF \
-            -DLLAMA_OPENSSL=OFF \
-            -DLLAMA_CURL=OFF \
-            -DLLAMA_BUILD_SERVER=OFF \
-            -DLLAMA_BUILD_TESTS=OFF \
-            -DLLAMA_BUILD_EXAMPLES=ON \
-            -DCMAKE_BUILD_TYPE=Release
-          cmake --build build-android --config Release --target llama-cli -j2
-          test -x build-android/bin/llama-cli
-          mkdir -p "$GITHUB_WORKSPACE/jarvis-src/app/src/main/assets"
-          cp build-android/bin/llama-cli "$GITHUB_WORKSPACE/jarvis-src/app/src/main/assets/llama-cli"
-          chmod 644 "$GITHUB_WORKSPACE/jarvis-src/app/src/main/assets/llama-cli"
-          file "$GITHUB_WORKSPACE/jarvis-src/app/src/main/assets/llama-cli"
+          set -e
+
+          test -f settings.gradle
+          test -f build.gradle
+          test -f gradle.properties
+          test -f app/build.gradle
+          test -f app/src/main/AndroidManifest.xml
+
+          test -f app/src/main/java/com/imnewcode/companion/MainActivity.java
+          test -f app/src/main/java/com/imnewcode/companion/live2d/Live2DView.java
+          test -f app/src/main/java/com/imnewcode/companion/live2d/Live2DBridge.java
+
+          test -f app/src/main/cpp/live2d/CMakeLists.txt
+
+          test -f app/src/main/cpp/live2d/sdk/Core/include/Live2DCubismCore.h
+          test -f app/src/main/cpp/live2d/sdk/Core/lib/android/arm64-v8a/libLive2DCubismCore.a
+
+          test -f app/src/main/assets/koharu/koharu.model3.json
+          test -f app/src/main/assets/koharu/koharu.moc3
+          test -f app/src/main/assets/koharu/koharu.physics3.json
+          test -f app/src/main/assets/koharu/koharu.2048/texture_00.png
+
+          echo "Prototype source verification passed."
 
       - name: Create Gradle wrapper
-        working-directory: jarvis-src
+        working-directory: companion-src
         run: |
           gradle wrapper --gradle-version 8.7
 
       - name: Build debug APK
-        working-directory: jarvis-src
-        run: ./gradlew --no-daemon assembleDebug
+        working-directory: companion-src
+        run: |
+          ./gradlew --no-daemon assembleDebug
+
+      - name: Verify APK
+        working-directory: companion-src
+        run: |
+          set -e
+
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+
+          test -f "$APK"
+
+          echo "=== APK ==="
+          ls -lh "$APK"
+
+          echo "=== APK contents ==="
+          unzip -l "$APK" | grep -E \
+            'lib/arm64-v8a/liblive2d\.so|assets/koharu/|AndroidManifest.xml' \
+            || true
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: JARVIS-debug-apk
-          path: jarvis-src/app/build/outputs/apk/debug/app-debug.apk
+          name: AI-Companion-Prototype-v0.1.0-debug
+          path: companion-src/app/build/outputs/apk/debug/app-debug.apk
