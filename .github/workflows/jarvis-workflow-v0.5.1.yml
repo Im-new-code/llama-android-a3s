@@ -1,7 +1,11 @@
-name: Build JARVIS Android 0.5.1
+name: Build JARVIS Android 0.5.2
 
 on:
   workflow_dispatch:
+
+concurrency:
+  group: jarvis-android-build
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -10,6 +14,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+
+      - name: Verify source archive is present
+        run: |
+          test -s jarvis-source.zip
+          unzip -t jarvis-source.zip
+          echo "Source archive OK"
 
       - name: Set up Java 17
         uses: actions/setup-java@v5
@@ -27,14 +37,25 @@ jobs:
                      "platform-tools" \
                      "ndk;27.2.12479018"
 
-      - name: Download source snapshot
-        env:
-          SOURCE_URL: https://raw.githubusercontent.com/Im-new-code/llama-android-a3s/main/jarvis-source.zip
+      - name: Extract JARVIS source
         run: |
           rm -rf jarvis-src
           mkdir -p jarvis-src
-          wget -q "$SOURCE_URL" -O jarvis-source.zip
           unzip -q jarvis-source.zip -d jarvis-src
+          test -f jarvis-src/app/build.gradle
+          test -f jarvis-src/app/src/main/java/com/jarvis/local/StartupActivity.java
+          test -f jarvis-src/app/src/main/java/com/jarvis/local/ai/LlamaCliEngine.java
+
+      - name: Validate persistent preload source
+        run: |
+          grep -q 'private void launchMain()' jarvis-src/app/src/main/java/com/jarvis/local/StartupActivity.java
+          grep -q 'llama-server' jarvis-src/app/src/main/java/com/jarvis/local/ai/LlamaCliEngine.java
+          grep -q '/health' jarvis-src/app/src/main/java/com/jarvis/local/ai/LlamaCliEngine.java
+          grep -q '/v1/chat/completions' jarvis-src/app/src/main/java/com/jarvis/local/ai/LlamaCliEngine.java
+          ! grep -R -- '--color off' jarvis-src/app/src/main/java
+          ! grep -R -- '--single-turn' jarvis-src/app/src/main/java/com/jarvis/local/ai
+          grep -q 'versionName "0.5.2"' jarvis-src/app/build.gradle
+          echo "Persistent preload source checks passed"
 
       - name: Download Sherpa ONNX Android runtime
         run: |
@@ -88,10 +109,15 @@ jobs:
 
       - name: Build debug APK
         working-directory: jarvis-src
-        run: ./gradlew --no-daemon assembleDebug
+        run: ./gradlew --no-daemon --stacktrace assembleDebug
+
+      - name: Verify APK output
+        run: |
+          test -s jarvis-src/app/build/outputs/apk/debug/app-debug.apk
+          ls -lh jarvis-src/app/build/outputs/apk/debug/app-debug.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: JARVIS-0.5.1-debug-apk
+          name: JARVIS-0.5.2-debug-apk
           path: jarvis-src/app/build/outputs/apk/debug/app-debug.apk
